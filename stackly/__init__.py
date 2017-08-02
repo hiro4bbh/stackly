@@ -45,10 +45,6 @@ class Layer:
         raise NotImplementedError()
     def get_size(self):
         return int(numpy.prod(self.get_shape()))
-    def get_param_shape(self):
-        return (0,)
-    def get_param_size(self):
-        return xpy.prod(self.get_param_shape())
     def get_dtype(self):
         raise NotImplementedError()
     def forward(self, xs):
@@ -119,8 +115,6 @@ class FullyConnected(Layer):
         return (self.x,)
     def get_shape(self):
         return (self.w.shape[0],)
-    def get_param_shape(self):
-        return self.w.shape
     def get_dtype(self):
         return self.w.dtype
     def forward(self, xs):
@@ -135,7 +129,7 @@ class FullyConnected(Layer):
         return (dx,)
 
 class SpatialConvolution(Layer):
-    def __init__(self, x, kernel_shape, step):
+    def __init__(self, x, nkernels, kernel_shape, step):
         self.x = x
         if len(x.shape) == 1:
             self.x = xpy.expand_dims(xpy.expand_dims(x, axis=0), axis=0)
@@ -145,28 +139,32 @@ class SpatialConvolution(Layer):
             pass
         else:
             raise Exception('x.shape must be one of inner subtensor of (nfeature_maps, nheights, nwidths)')
-        if len(kernel_shape) != 2:
-            raise Exception('kernel_shape must be (nheights, nwidths)')
+        if nkernels <= 0:
+            raise Exception('nkernels must be at least 1')
+        if len(kernel_shape) != 3:
+            raise Exception('kernel_shape must be (nfeature_maps, nheights, nwidths)')
         if len(step) != 2:
             raise Exception('step must be (height_steps, width_steps)')
+        if kernel_shape[0] != x.shape[0]:
+            raise Exception('the case that nfeature_maps of kernel != nfeature_maps of x is not supported')
         if ((x.shape[1] - kernel_shape[0])/step[0] + 1)%1 != 0:
             raise Exception('kernel height and height step must be conformant to shape of x')
         if ((x.shape[2] - kernel_shape[1])/step[1] + 1)%1 != 0:
             raise Exception('kernel width and width step must be conformant to shape of x')
+        self.nkernels = nkernels
         self.kernel_shape = kernel_shape
         self.step = step
-        self.w = asxpy(numpy.random.normal(size=numpy.prod(kernel_shape)).astype(x.get_dtype()).reshape(kernel_shape[0], kernel_shape[1]))
+        self.w = asxpy(numpy.random.normal(size=nkernels*numpy.prod(kernel_shape)).astype(x.get_dtype()).reshape(nkernels, *kernel_shape))
     def get_params(self):
-        return (self.x, self.kernel_shape, step)
+        return (self.x, self.nkernels, self.kernel_shape, step)
     def get_prev_layers(self):
         return (self.x,)
     def get_shape(self):
-        return ((x.shape[1] - kernel_shape[0])/step[0] + 1, (x.shape[2] - kernel_shape[1])/step[1] + 1)
-    def get_param_shape(self):
-        return self.w.shape
+        return (nkernels, (x.shape[1] - kernel_shape[0])/step[0] + 1, (x.shape[2] - kernel_shape[1])/step[1] + 1)
     def get_dtype(self):
         return self.x.get_dtype()
     def forward(self, xs):
+        x = xs[0]
         pass
     def backward(self, xs, y, dy, m):
         pass
@@ -245,8 +243,8 @@ class OptimizerBase:
             prev_layers = layer.get_prev_layers()
             self.prev_layers.append([])
             param_man = None
-            if len(prev_layers) > 0:
-                param_man = self.ParameterManager(self, layer.get_param_shape(), layer.get_dtype())
+            if len(prev_layers) > 0 and hasattr(layer, 'w'):
+                param_man = self.ParameterManager(self, layer.w.shape, layer.get_dtype())
             self.param_mans.append(param_man)
             for prev_layer in prev_layers:
                 self.prev_layers[layer_id].append(traverse_layers(prev_layer))
