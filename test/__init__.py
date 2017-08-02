@@ -20,40 +20,32 @@ class TestPreprocessing(unittest.TestCase):
         numpy.testing.assert_almost_equal(asnumpy(normalize(X)), asnumpy(Xnormalized), decimal=FLOAT32_FINE_PRECISION)
 
 class TestLayer(unittest.TestCase):
-    def test_spatial_convolution(self):
+    def test_spatial_convolution_forward(self):
         import numpy
         from stackly import xpy, asnumpy, asxpy, Variable, SpatialConvolution
-        image = Variable('image', (3, 15, 15), dtype=xpy.float32)
-        filter_layer = SpatialConvolution(image, 4, (3, 5, 5), (5, 5))
+        image = Variable('image', (3, 9, 15), dtype=xpy.float32)
+        filter_layer = SpatialConvolution(image, 4, (3, 3, 5), (3, 5))
         # Initialize the weight manually.
         w = numpy.array([numpy.repeat([[
                 [0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0],
                 [1, 1, 1, 1, 1],
                 [0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0],
             ]], 3, axis=0), numpy.repeat([[
-                [0, 0, 0, 0, 1],
-                [0, 0, 0, 1, 0],
+                [0, 0, 0, 1, 1],
                 [0, 0, 1, 0, 0],
-                [0, 1, 0, 0, 0],
-                [1, 0, 0, 0, 0],
+                [1, 1, 0, 0, 0],
             ]], 3, axis=0), numpy.repeat([[
                 [0, 0, 1, 0, 0],
                 [0, 0, 1, 0, 0],
                 [0, 0, 1, 0, 0],
-                [0, 0, 1, 0, 0],
-                [0, 0, 1, 0, 0],
             ]], 3, axis=0), numpy.repeat([[
-                [1, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0],
+                [1, 1, 0, 0, 0],
                 [0, 0, 1, 0, 0],
-                [0, 0, 0, 1, 0],
-                [0, 0, 0, 0, 1],
+                [0, 0, 0, 1, 1],
             ]], 3, axis=0)], dtype=numpy.float32)
         filter_layer.w = asxpy(w)
         # Prepare 4 images for testing the above 4 kernels.
-        images = numpy.zeros((4, 3, 15, 15), dtype=numpy.float32)
+        images = numpy.zeros((4, 3, 9, 15), dtype=numpy.float32)
         for n in range(images.shape[0]):
             images[n] = numpy.tile(w[n], (1, 3, 3))
         images = asxpy(images)
@@ -64,7 +56,7 @@ class TestLayer(unittest.TestCase):
             filtered_image = filtered_images[n]
             expected = numpy.copy(expected_template)
             start = n*numpy.prod(filtered_image.shape[1:])
-            expected[start:(start+numpy.prod(filtered_image.shape[1:]))] = 15
+            expected[start:(start+numpy.prod(filtered_image.shape[1:]))] = numpy.sum(w[n])
             expected = expected.reshape(filtered_image.shape)
             numpy.testing.assert_equal(asnumpy(filtered_image), expected)
 
