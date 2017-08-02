@@ -160,26 +160,31 @@ class SpatialConvolution(Layer):
     def get_prev_layers(self):
         return (self.x,)
     def get_shape(self):
-        return (self.nkernels, int((self.x.shape[1] - self.kernel_shape[1])/self.step[0] + 1), int((self.x.shape[2] - self.kernel_shape[2])/self.step[1] + 1))
+        return SpatialConvolution.get_output_shape(self.w.shape, self.step, self.x.shape)
     def get_dtype(self):
         return self.x.get_dtype()
     def forward(self, xs):
-        x = xs[0]
-        # x.shape = (nentries, nfeature_maps, height, width)
-        x = self.reshape_input(x)
-        # x.shape = (nentries, nfeature_maps, output_height, output_width, kernel_height, kernel_width)
-        y = xpy.tensordot(x, self.w, axes=((1, 4, 5), (1, 2, 3)))
-        # y.shape = (nentries, output_height, output_width, nkernels)
-        y = xpy.transpose(y, axes=(0, 3, 1, 2))
-        return y.reshape(y.shape[0], *self.get_shape())
-        # y.shape = (nentries, nkernels, output_height, output_width)
+        return SpatialConvolution.convolve(self.w, self.step, xs[0])
     def backward(self, xs, y, dy, m):
         pass
-    def reshape_input(self, x):
-        x_ = xpy.zeros((x.shape[0], *self.get_shape()[1:], *self.w.shape[1:]))
-        h_step, w_step = self.step
-        for h in range(self.w.shape[2]):
-            for w in range(self.w.shape[3]):
+    def get_output_shape(w_shape, step, x_shape):
+        return (w_shape[0], int((x_shape[1] - w_shape[2])/step[0] + 1), int((x_shape[2] - w_shape[3])/step[1] + 1))
+    def convolve(w, step, x):
+        output_shape = SpatialConvolution.get_output_shape(w.shape, step, x.shape[1:])
+        # x.shape = (nentries, nfeature_maps, height, width)
+        x = SpatialConvolution.reshape_input(w.shape, step, x)
+        # x.shape = (nentries, nfeature_maps, output_height, output_width, kernel_height, kernel_width)
+        y = xpy.tensordot(x, w, axes=((1, 4, 5), (1, 2, 3)))
+        # y.shape = (nentries, output_height, output_width, nkernels)
+        y = xpy.transpose(y, axes=(0, 3, 1, 2))
+        return y.reshape(y.shape[0], *output_shape)
+        # y.shape = (nentries, nkernels, output_height, output_width)
+    def reshape_input(w_shape, step, x):
+        output_shape = SpatialConvolution.get_output_shape(w_shape, step, x.shape[1:])
+        x_ = xpy.zeros((x.shape[0], *output_shape[1:], *w_shape[1:]))
+        h_step, w_step = step
+        for h in range(w_shape[2]):
+            for w in range(w_shape[3]):
                 x_[:, :, :, :, h, w] = x[:, :, h::h_step, w::w_step]
         return x_
 
