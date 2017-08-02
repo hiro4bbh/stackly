@@ -19,6 +19,55 @@ class TestPreprocessing(unittest.TestCase):
         ], dtype=xpy.float32)
         numpy.testing.assert_almost_equal(asnumpy(normalize(X)), asnumpy(Xnormalized), decimal=FLOAT32_FINE_PRECISION)
 
+class TestLayer(unittest.TestCase):
+    def test_spatial_convolution(self):
+        import numpy
+        from stackly import xpy, asnumpy, asxpy, Variable, SpatialConvolution
+        image = Variable('image', (3, 15, 15), dtype=xpy.float32)
+        filter_layer = SpatialConvolution(image, 4, (3, 5, 5), (5, 5))
+        # Initialize the weight manually.
+        w = numpy.array([numpy.repeat([[
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+                [1, 1, 1, 1, 1],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+            ]], 3, axis=0), numpy.repeat([[
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 1, 0],
+                [0, 0, 1, 0, 0],
+                [0, 1, 0, 0, 0],
+                [1, 0, 0, 0, 0],
+            ]], 3, axis=0), numpy.repeat([[
+                [0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0],
+            ]], 3, axis=0), numpy.repeat([[
+                [1, 0, 0, 0, 0],
+                [0, 1, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 0, 1, 0],
+                [0, 0, 0, 0, 1],
+            ]], 3, axis=0)], dtype=numpy.float32)
+        filter_layer.w = asxpy(w)
+        # Prepare 4 images for testing the above 4 kernels.
+        images = numpy.zeros((4, 3, 15, 15), dtype=numpy.float32)
+        for n in range(images.shape[0]):
+            images[n] = numpy.tile(w[n], (1, 3, 3))
+        images = asxpy(images)
+        # Test forward.
+        filtered_images = filter_layer.forward((images,))
+        expected_template = numpy.full(numpy.prod(filtered_images.shape[1:]), 3, dtype=numpy.float32)
+        for n in range(filtered_images.shape[0]):
+            filtered_image = filtered_images[n]
+            expected = numpy.copy(expected_template)
+            start = n*numpy.prod(filtered_image.shape[1:])
+            expected[start:(start+numpy.prod(filtered_image.shape[1:]))] = 15
+            expected = expected.reshape(filtered_image.shape)
+            numpy.testing.assert_equal(asnumpy(filtered_image), expected)
+
 class TestNetworkFit(unittest.TestCase):
     def test_multivariate_linear_complete_fit(self):
         from stackly import xpy, normalize, Variable, FullyConnected, SquaredLoss, Adam
@@ -141,5 +190,6 @@ class TestNetworkFit(unittest.TestCase):
 def make_suite():
     suite = unittest.TestSuite()
     suite.addTests(unittest.makeSuite(TestPreprocessing))
+    suite.addTests(unittest.makeSuite(TestLayer))
     suite.addTests(unittest.makeSuite(TestNetworkFit))
     return suite

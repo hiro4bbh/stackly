@@ -34,8 +34,7 @@ class Dataset:
                 with open(dfilename, 'wb') as f:
                     f.write(df.read())
     def read_file(self, filename):
-        from os import path
-        with open(path.join(self.path, filename), 'rb') as f:
+        with open(os.path.join(self.path, filename), 'rb') as f:
             return f.read()
 
 from stackly.dataset.mnist import *

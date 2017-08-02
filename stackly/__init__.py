@@ -129,7 +129,7 @@ class FullyConnected(Layer):
         return (dx,)
 
 class SpatialConvolution(Layer):
-    def __init__(self, x, nkernels, kernel_shape, step):
+    def __init__(self, x, nkernels, kernel_shape, step=(1, 1)):
         self.x = x
         if len(x.shape) == 1:
             self.x = xpy.expand_dims(xpy.expand_dims(x, axis=0), axis=0)
@@ -138,18 +138,18 @@ class SpatialConvolution(Layer):
         elif len(x.shape) == 3:
             pass
         else:
-            raise Exception('x.shape must be one of inner subtensor of (nfeature_maps, nheights, nwidths)')
+            raise Exception('x.shape must be one of inner subtensor of (nfeature_maps, height, width)')
         if nkernels <= 0:
             raise Exception('nkernels must be at least 1')
         if len(kernel_shape) != 3:
-            raise Exception('kernel_shape must be (nfeature_maps, nheights, nwidths)')
+            raise Exception('kernel_shape must be (nfeature_maps, height, nwidth)')
         if len(step) != 2:
             raise Exception('step must be (height_steps, width_steps)')
         if kernel_shape[0] != x.shape[0]:
             raise Exception('the case that nfeature_maps of kernel != nfeature_maps of x is not supported')
-        if ((x.shape[1] - kernel_shape[0])/step[0] + 1)%1 != 0:
+        if (x.shape[1] - kernel_shape[1])%step[0] != 0:
             raise Exception('kernel height and height step must be conformant to shape of x')
-        if ((x.shape[2] - kernel_shape[1])/step[1] + 1)%1 != 0:
+        if (x.shape[2] - kernel_shape[2])%step[1] != 0:
             raise Exception('kernel width and width step must be conformant to shape of x')
         self.nkernels = nkernels
         self.kernel_shape = kernel_shape
@@ -160,14 +160,28 @@ class SpatialConvolution(Layer):
     def get_prev_layers(self):
         return (self.x,)
     def get_shape(self):
-        return (nkernels, (x.shape[1] - kernel_shape[0])/step[0] + 1, (x.shape[2] - kernel_shape[1])/step[1] + 1)
+        return (self.nkernels, int((self.x.shape[1] - self.kernel_shape[1])/self.step[0] + 1), int((self.x.shape[2] - self.kernel_shape[2])/self.step[1] + 1))
     def get_dtype(self):
         return self.x.get_dtype()
     def forward(self, xs):
         x = xs[0]
-        pass
+        # x.shape = (nentries, nfeature_maps, height, width)
+        x = self.reshape_input(x)
+        # x.shape = (nentries, nfeature_maps, output_height, output_width, kernel_height, kernel_width)
+        y = xpy.tensordot(x, self.w, axes=((1, 4, 5), (1, 2, 3)))
+        # y.shape = (nentries, output_height, output_width, nkernels)
+        y = xpy.transpose(y, axes=(0, 3, 1, 2))
+        return y.reshape(y.shape[0], *self.get_shape())
+        # y.shape = (nentries, nkernels, output_height, output_width)
     def backward(self, xs, y, dy, m):
         pass
+    def reshape_input(self, x):
+        x_ = xpy.zeros((x.shape[0], *self.get_shape()[1:], *self.w.shape[1:]))
+        h_step, w_step = self.step
+        for h in range(self.w.shape[2]):
+            for w in range(self.w.shape[3]):
+                x_[:, :, :, :, h, w] = x[:, :, h::h_step, w::w_step]
+        return x_
 
 class ReLU(Layer):
     def __init__(self, x):
