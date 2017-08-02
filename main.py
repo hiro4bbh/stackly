@@ -1,6 +1,6 @@
 import numpy
 from stackly import xpy, normalize, Constant, Variable, Concat, FullyConnected, ReLU, SquaredLoss, NegativeSoftmaxCrossEntropyLoss, Adam
-from stackly import MNISTDataset
+from stackly.dataset import MNISTDataset
 
 mnist = MNISTDataset('data/mnist')
 
@@ -13,6 +13,7 @@ y2 = FullyConnected(y2, 50)
 y3 = ReLU(y2)
 y3 = FullyConnected(y3, 10)
 
+print(y3)
 import code
 code.interact(local=locals())
 exit(1)

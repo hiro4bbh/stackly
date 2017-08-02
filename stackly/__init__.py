@@ -51,9 +51,9 @@ class Layer:
         return xpy.prod(self.get_param_shape())
     def get_dtype(self):
         raise NotImplementedError()
-    def forward(self, x):
+    def forward(self, xs):
         raise NotImplementedError()
-    def backward(self, x, y, dy, m):
+    def backward(self, xs, y, dy, m):
         raise NotImplementedError()
     def __repr__(self):
         return "{}({})".format(type(self).__name__, ','.join([str(param) for param in self.get_params()]))
@@ -69,7 +69,7 @@ class Constant(Layer):
         return self.value.shape
     def get_dtype(self):
         return self.value.dtype
-    def forward(self, x):
+    def forward(self, xs):
         return asxpy(numpy.array([self.value], dtype=self.value.dtype))
 
 class Variable(Layer):
@@ -87,24 +87,24 @@ class Variable(Layer):
         return self.dtype
 
 class Concat(Layer):
-    def __init__(self, x):
-        self.x = x
-        self.indices = numpy.cumsum([v.get_size() for v in x])
+    def __init__(self, xs):
+        self.xs = xs
+        self.indices = numpy.cumsum([v.get_size() for v in xs])
         self.shape = self.indices[-1]
         self.indices = self.indices[:-1]
     def get_params(self):
-        return (self.x,)
+        return (self.xs,)
     def get_prev_layers(self):
-        return self.x
+        return self.xs
     def get_shape(self):
         return (self.shape,)
     def get_dtype(self):
-        return self.x[0].get_dtype()
-    def forward(self, x):
-        sizes = xpy.array([v.shape[0] for v in x])
+        return self.xs[0].get_dtype()
+    def forward(self, xs):
+        sizes = xpy.array([v.shape[0] for v in xs])
         repeats = xpy.max(sizes)//sizes
-        return xpy.concatenate([x[i].repeat(int(repeats[i]), axis=0) for i in range(len(x))], axis=1)
-    def backward(self, x, y, dy, dw):
+        return xpy.concatenate([xs[i].repeat(int(repeats[i]), axis=0) for i in range(len(xs))], axis=1)
+    def backward(self, xs, y, dy, dw):
         dx = xpy.hsplit(dy, self.indices)
         return dx
 
@@ -123,16 +123,53 @@ class FullyConnected(Layer):
         return self.w.shape
     def get_dtype(self):
         return self.w.dtype
-    def forward(self, x):
-        x = x[0].reshape(x[0].shape[0], -1)
-        return xpy.tensordot(x, self.w, axes=([1], [1]))
-    def backward(self, x, y, dy, m):
-        x = x[0].reshape(x[0].shape[0], -1)
-        dx = xpy.tensordot(dy, self.w, axes=([1], [0]))
+    def forward(self, xs):
+        x = xs[0].reshape(xs[0].shape[0], -1)
+        return xpy.tensordot(x, self.w, axes=((1,), (1,)))
+    def backward(self, xs, y, dy, m):
+        x = xs[0].reshape(xs[0].shape[0], -1)
+        dx = xpy.tensordot(dy, self.w, axes=((1,), (0,)))
         if self.mutable:
-            dw = xpy.tensordot(dy, x, axes=([0], [0]))/dy.shape[0]
+            dw = xpy.tensordot(dy, x, axes=((0,), (0,)))/dy.shape[0]
             self.w += m(dw)
         return (dx,)
+
+class SpatialConvolution(Layer):
+    def __init__(self, x, kernel_shape, step):
+        self.x = x
+        if len(x.shape) == 1:
+            self.x = xpy.expand_dims(xpy.expand_dims(x, axis=0), axis=0)
+        elif len(x.shape) == 2:
+            self.x = xpy.expand_dims(x, axis=0)
+        elif len(x.shape) == 3:
+            pass
+        else:
+            raise Exception('x.shape must be one of inner subtensor of (nfeature_maps, nheights, nwidths)')
+        if len(kernel_shape) != 2:
+            raise Exception('kernel_shape must be (nheights, nwidths)')
+        if len(step) != 2:
+            raise Exception('step must be (height_steps, width_steps)')
+        if ((x.shape[1] - kernel_shape[0])/step[0] + 1)%1 != 0:
+            raise Exception('kernel height and height step must be conformant to shape of x')
+        if ((x.shape[2] - kernel_shape[1])/step[1] + 1)%1 != 0:
+            raise Exception('kernel width and width step must be conformant to shape of x')
+        self.kernel_shape = kernel_shape
+        self.step = step
+        self.w = asxpy(numpy.random.normal(size=numpy.prod(kernel_shape)).astype(x.get_dtype()).reshape(kernel_shape[0], kernel_shape[1]))
+    def get_params(self):
+        return (self.x, self.kernel_shape, step)
+    def get_prev_layers(self):
+        return (self.x,)
+    def get_shape(self):
+        return ((x.shape[1] - kernel_shape[0])/step[0] + 1, (x.shape[2] - kernel_shape[1])/step[1] + 1)
+    def get_param_shape(self):
+        return self.w.shape
+    def get_dtype(self):
+        return self.x.get_dtype()
+    def forward(self, xs):
+        pass
+    def backward(self, xs, y, dy, m):
+        pass
 
 class ReLU(Layer):
     def __init__(self, x):
@@ -145,9 +182,9 @@ class ReLU(Layer):
         return self.x.get_shape()
     def get_dtype(self):
         return self.x.get_dtype()
-    def forward(self, x):
-        return xpy.maximum(x[0], 0.0)
-    def backward(self, x, y, dy, m):
+    def forward(self, xs):
+        return xpy.maximum(xs[0], 0.0)
+    def backward(self, xs, y, dy, m):
         return (dy*xpy.sign(y),)
 
 class SquaredLoss:
@@ -282,86 +319,4 @@ class Adam(OptimizerBase):
                 delta = Adam.kernel(t, self.optim.alpha, self.optim.beta1, self.optim.beta2, self.optim.epsilon, g, self.m, self.v, delta)[2]
             return delta.astype(g.dtype)
 
-class Dataset:
-    def __init__(self, path):
-        self.path = path
-        import os
-        from os import path
-        if not path.isdir(self.path):
-            os.makedirs(self.path)
-    def download_file(self, url, filename=None, cache=True):
-        from os import path
-        if filename is None:
-            filename = path.basename(url)
-        filename = path.join(self.path, filename)
-        if cache:
-            if path.exists(filename):
-                return
-        print('downloading {} ...', url)
-        from urllib.request import urlretrieve
-        return urlretrieve(url, filename=filename)[0]
-    def detect_compression(self, filename):
-        if filename.endswith('.gz'):
-            return filename[:-3], 'gzip'
-        return filename, None
-    def decompress_file(self, filename, cache=True):
-        from os import path
-        filename = path.join(self.path, filename)
-        dfilename, dtype = self.detect_compression(filename)
-        if dtype is None:
-            return
-        if cache:
-            if path.exists(dfilename):
-                return
-        print('decompressing {} (type: {}) ...'.format(filename, dtype))
-        if dtype == 'gzip':
-            import gzip
-            with gzip.open(filename) as df:
-                with open(dfilename, 'wb') as f:
-                    f.write(df.read())
-    def read_file(self, filename):
-        from os import path
-        with open(path.join(self.path, filename), 'rb') as f:
-            return f.read()
-
-class MNISTDataset(Dataset):
-    SERVERURL = 'http://yann.lecun.com/exdb/mnist/'
-    FILENAMES = {
-        'train-images': 'train-images-idx3-ubyte.gz',
-        'train-labels': 'train-labels-idx1-ubyte.gz',
-        'test-images': 't10k-images-idx3-ubyte.gz',
-        'test-labels': 't10k-labels-idx1-ubyte.gz',
-    }
-    def __init__(self, path):
-        super(MNISTDataset, self).__init__(path)
-        self.data = {}
-        from os import path
-        from struct import unpack
-        for key in self.FILENAMES:
-            filename = self.FILENAMES[key]
-            self.download_file(path.join(self.SERVERURL, filename))
-            self.decompress_file(filename)
-            filename, _ = self.detect_compression(filename)
-            filedata = self.read_file(filename)
-            if len(filedata) < 8:
-                raise Exception('illegal header for file {}'.format(filename))
-            magic, nitems = unpack('>II', filedata[:8])
-            p = 8
-            if key.endswith('images'):
-                print('reading {} image(s) in {}'.format(nitems, filename))
-                if not magic == 0x00000803:
-                    raise Exception('illegal magic for image file {}'.format(filename))
-                if len(filedata) - p < 8:
-                    raise Exception('illegal header for image file {}'.format(filename))
-                nrows, ncols = unpack('>II', filedata[p:p+8])
-                p += 8
-                if not len(filedata) - p == nitems*nrows*ncols:
-                    raise Exception('malformed image file {}'.format(filename))
-                self.data[key] = xpy.array(bytearray(filedata[p:]), dtype=xpy.float16).reshape(nitems, nrows, ncols)
-            else:
-                print('reading {} label(s) in {}'.format(nitems, filename))
-                if not magic == 0x00000801:
-                    raise Exception('illegal magic for label file {}'.format(filename))
-                if not nitems == len(filedata) - p:
-                    raise Exception('malformed label file {}'.format(filename))
-                self.data[key] = xpy.array(bytearray(filedata[p:]))
+from stackly import dataset
