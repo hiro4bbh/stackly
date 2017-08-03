@@ -1,5 +1,6 @@
+import sys
 import numpy
-from stackly import xpy, normalize, Constant, Variable, Concat, FullyConnected, ReLU, SquaredLoss, NegativeSoftmaxCrossEntropyLoss, Adam
+from stackly import xpy, normalize, Constant, Variable, Concat, FullyConnected, SpatialConvolution, ReLU, SquaredLoss, NegativeSoftmaxCrossEntropyLoss, Adam
 from stackly.dataset import MNISTDataset
 
 mnist = MNISTDataset('data/mnist')
@@ -7,18 +8,24 @@ mnist = MNISTDataset('data/mnist')
 xpy.random.seed(0)
 
 x = Variable('image', (28, 28), dtype=xpy.float32)
-y1 = FullyConnected(x, 320)
-y2 = ReLU(y1)
-y2 = FullyConnected(y2, 50)
-y3 = ReLU(y2)
-y3 = FullyConnected(y3, 10)
+model = '3FC'
+if model == '3FC':
+    y1 = FullyConnected(x, 320)
+    y2 = ReLU(y1)
+    y2 = FullyConnected(y2, 50)
+    y3 = ReLU(y2)
+    y = FullyConnected(y3, 10)
+    # Final Precision:
+elif model == '1SC':
+    y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
+    y2 = ReLU(y1)
+    y = FullyConnected(y2, 10)
+else:
+    raise Exception('unknown model: {}'.format(model))
 
-print(y3)
-import code
-code.interact(local=locals())
-exit(1)
+print("model {}: {}".format(model, y))
 
-optim = Adam(y3, NegativeSoftmaxCrossEntropyLoss)
+optim = Adam(y, NegativeSoftmaxCrossEntropyLoss)
 
 images = mnist.data['train-images']
 #images = normalize(images)
@@ -41,11 +48,15 @@ for t in range(1, 100):
         batch_loss = optim.run({'image': images[start:end]}, labels[start:end])
         #print("t={:4d}({:.2f}%): batch_loss={:.5f}; {}, {}, {}".format(t, batch*100/nbatches, batch_loss, xpy.linalg.norm(y1.w), xpy.linalg.norm(y2.w), xpy.linalg.norm(y3.w)))
         loss += batch_loss
+        sys.stdout.write('.')
+        sys.stdout.flush()
     loss /= nbatches
     print("t={:4d}: loss={:.5f}".format(t, loss))
-    y = optim.forward({'image': test_images})[0]
-    flags = test_labels == xpy.amax(y, axis=1)
-    print("{}/{}".format(xpy.sum(flags), len(flags)))
+    train_predicteds = optim.forward({'image': images})[0]
+    train_correcteds = labels == xpy.argmax(train_predicteds, axis=1)
+    test_predicteds = optim.forward({'image': test_images})[0]
+    test_correcteds = test_labels == xpy.argmax(test_predicteds, axis=1)
+    print("train: {}/{}, test: {}/{}".format(xpy.sum(train_correcteds), len(train_correcteds), xpy.sum(test_correcteds), len(test_correcteds)))
 
 """
 import time

@@ -122,14 +122,14 @@ class FullyConnected(Layer):
         return xpy.tensordot(x, self.w, axes=((1,), (1,)))
     def backward(self, xs, y, dy, m):
         x = xs[0].reshape(xs[0].shape[0], -1)
-        dx = xpy.tensordot(dy, self.w, axes=((1,), (0,)))
+        dx = xpy.tensordot(dy, self.w, axes=((1,), (0,))).reshape(x.shape[0], *self.x.get_shape())
         if self.mutable:
             dw = xpy.tensordot(dy, x, axes=((0,), (0,)))/dy.shape[0]
             self.w += m(dw)
         return (dx,)
 
 class SpatialConvolution(Layer):
-    def __init__(self, x, nkernels, kernel_shape, step=(1, 1)):
+    def __init__(self, x, nkernels, kernel_shape, step=(1, 1), mutable=True):
         self.x = x
         if len(x.shape) == 1:
             self.x = xpy.expand_dims(xpy.expand_dims(x, axis=0), axis=0)
@@ -145,18 +145,19 @@ class SpatialConvolution(Layer):
             raise Exception('kernel_shape must be (nfeature_maps, height, nwidth)')
         if len(step) != 2:
             raise Exception('step must be (height_steps, width_steps)')
-        if kernel_shape[0] != x.shape[0]:
+        if kernel_shape[0] != self.x.shape[0]:
             raise Exception('the case that nfeature_maps of kernel != nfeature_maps of x is not supported')
-        if (x.shape[1] - kernel_shape[1])%step[0] != 0:
+        if (self.x.shape[1] - kernel_shape[1])%step[0] != 0:
             raise Exception('kernel height and height step must be conformant to shape of x')
-        if (x.shape[2] - kernel_shape[2])%step[1] != 0:
+        if (self.x.shape[2] - kernel_shape[2])%step[1] != 0:
             raise Exception('kernel width and width step must be conformant to shape of x')
         self.nkernels = nkernels
         self.kernel_shape = kernel_shape
         self.step = step
+        self.mutable = mutable
         self.w = asxpy(numpy.random.normal(size=nkernels*numpy.prod(kernel_shape)).astype(x.get_dtype()).reshape(nkernels, *kernel_shape))
     def get_params(self):
-        return (self.x, self.nkernels, self.kernel_shape, step)
+        return (self.x, self.nkernels, self.kernel_shape, self.step, self.mutable)
     def get_prev_layers(self):
         return (self.x,)
     def get_shape(self):
@@ -164,21 +165,39 @@ class SpatialConvolution(Layer):
     def get_dtype(self):
         return self.x.get_dtype()
     def forward(self, xs):
-        return SpatialConvolution.convolve(self.w, self.step, xs[0])
+        x = xs[0]
+        # x.shape = (nentries, nfeature_maps, height, width)
+        y = SpatialConvolution.convolve(self.w, self.step, x)
+        # y.shape = (nentries, output_height, output_width, nkernels)
+        y = xpy.transpose(y, axes=(0, 3, 1, 2))
+        # y.shape = (nentries, nkernels, output_height, output_width)
+        return y
     def backward(self, xs, y, dy, m):
-        pass
+        x = xs[0]
+        # x.shape = (nentries, nfeature_maps, height, width)
+        y = SpatialConvolution.reshape_output(self.x.shape, self.w.shape, self.step, y)
+        # y.shape = (nentries, nkernels, height, width, kernel_height, kernel_width)
+        dx = xpy.sum(y, axis=(1, 4, 5))
+        # dx.shape = (nentries, nfeature_maps, height, width)
+        if self.mutable:
+            dy = SpatialConvolution.reshape_output(self.x.shape, self.w.shape, self.step, dy)
+            # dy.shape = (nentries, nkernels, height, width, kernel_height, kernel_width)
+            dw = xpy.tensordot(dy, x, axes=((0, 2, 3), (0, 2, 3)))
+            # dw.shape = (nkernels, kernel_height, kernel_width, nfeature_maps)
+            dw = xpy.transpose(dw, axes=(0, 3, 1, 2))
+            # dw.shape = (nkernels, nfeature_maps, kernel_height, kernel_width)
+            self.w += m(dw)
+        return (dx,)
     def get_output_shape(w_shape, step, x_shape):
         return (w_shape[0], int((x_shape[1] - w_shape[2])/step[0] + 1), int((x_shape[2] - w_shape[3])/step[1] + 1))
-    def convolve(w, step, x):
+    def convolve(w, step, x, kernel_axes=((1, 4, 5), (1, 2, 3))):
         output_shape = SpatialConvolution.get_output_shape(w.shape, step, x.shape[1:])
         # x.shape = (nentries, nfeature_maps, height, width)
         x = SpatialConvolution.reshape_input(w.shape, step, x)
         # x.shape = (nentries, nfeature_maps, output_height, output_width, kernel_height, kernel_width)
-        y = xpy.tensordot(x, w, axes=((1, 4, 5), (1, 2, 3)))
+        y = xpy.tensordot(x, w, axes=kernel_axes)
         # y.shape = (nentries, output_height, output_width, nkernels)
-        y = xpy.transpose(y, axes=(0, 3, 1, 2))
-        return y.reshape(y.shape[0], *output_shape)
-        # y.shape = (nentries, nkernels, output_height, output_width)
+        return y
     def reshape_input(w_shape, step, x):
         output_shape = SpatialConvolution.get_output_shape(w_shape, step, x.shape[1:])
         x_ = xpy.zeros((x.shape[0], *output_shape[1:], *w_shape[1:]))
@@ -187,6 +206,13 @@ class SpatialConvolution(Layer):
             for w in range(w_shape[3]):
                 x_[:, :, :, :, h, w] = x[:, :, h::h_step, w::w_step]
         return x_
+    def reshape_output(x_shape, w_shape, step, y):
+        y_ = xpy.zeros((y.shape[0], w_shape[0], *x_shape[1:], *w_shape[2:]))
+        h_step, w_step = w_shape[2:]
+        for h in range(w_shape[2]):
+            for w in range(w_shape[3]):
+                y_[:, :, h::h_step, w::w_step, h, w] = y
+        return y_
 
 class ReLU(Layer):
     def __init__(self, x):

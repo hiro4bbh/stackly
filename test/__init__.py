@@ -178,6 +178,58 @@ class TestNetworkFit(unittest.TestCase):
             loss /= nbatches
             #print("t={:4d}: loss={:.5f}: W={}".format(t, loss, y.w))
         self.assertAlmostEqual(loss, 0.0, places=FLOAT32_COARSE_PRECISION)
+    def test_spatial_convolution_complete_fit(self):
+        import numpy
+        from stackly import xpy, asnumpy, asxpy, Variable, FullyConnected, SpatialConvolution, NegativeSoftmaxCrossEntropyLoss, Adam
+        numpy.random.seed(0)
+        xpy.random.seed(0)
+        image = Variable('image', (3, 9, 15), dtype=xpy.float32)
+        filter_layer = SpatialConvolution(image, 4, (3, 3, 5), (3, 5))
+        y = FullyConnected(filter_layer, 4)
+        # Initialize the population weight.
+        w = numpy.array([numpy.repeat([[
+                [0, 0, 0, 0, 0],
+                [1, 1, 1, 1, 1],
+                [0, 0, 0, 0, 0],
+            ]], 3, axis=0), numpy.repeat([[
+                [0, 0, 0, 1, 1],
+                [0, 0, 1, 0, 0],
+                [1, 1, 0, 0, 0],
+            ]], 3, axis=0), numpy.repeat([[
+                [0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 1, 0, 0],
+            ]], 3, axis=0), numpy.repeat([[
+                [1, 1, 0, 0, 0],
+                [0, 0, 1, 0, 0],
+                [0, 0, 0, 1, 1],
+            ]], 3, axis=0)], dtype=numpy.float32)
+        self.assertEqual(str(y), 'FullyConnected(SpatialConvolution(Variable(image,(3, 9, 15),<class \'numpy.float32\'>),4,(3, 3, 5),(3, 5),True),4,True)')
+        optim = Adam(y, NegativeSoftmaxCrossEntropyLoss)
+        # Prepare 4*250 images for testing the above 4 kernels.
+        images = numpy.zeros((4*250, 3, 9, 15), dtype=numpy.float32)
+        data_y = numpy.zeros(4*250)
+        for t in range(w.shape[0]):
+            data_y[t*250:(t+1)*250] = t
+            for n in range(250):
+                images[t*250+n] = numpy.tile(w[t], (1, 3, 3))
+        images = asxpy(images)
+        batch_size = 50
+        nbatches = images.shape[0]//batch_size
+        for t in range(1, 51):
+            p = numpy.random.permutation(images.shape[0])
+            images, data_y = images[p], data_y[p]
+            loss = 0.0
+            for batch in range(nbatches):
+                start, end = batch*batch_size, (batch+1)*batch_size
+                batch_loss = optim.run({'image': images[start:end]}, data_y[start:end])
+                loss += batch_loss
+            loss /= nbatches
+            #print("t={:4d}: loss={:.5f}".format(t, loss))
+            #predicteds = optim.forward({'image': images})[0]
+            #correcteds = data_y == xpy.argmax(predicteds, axis=1)
+            #print("precision: {}/{}".format(xpy.sum(correcteds), len(correcteds)))
+        self.assertAlmostEqual(loss, 0.0, places=FLOAT32_COARSE_PRECISION)
 
 def make_suite():
     suite = unittest.TestSuite()
