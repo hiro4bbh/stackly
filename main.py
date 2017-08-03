@@ -39,7 +39,7 @@ test_labels = mnist.data['test-labels']
 
 batch_size = 100
 nbatches = images.shape[0]//batch_size
-for t in range(1, 100):
+for t in range(1, 200):
     p = xpy.random.permutation(images.shape[0])
     images, labels = images[p], labels[p]
     loss = 0.0
