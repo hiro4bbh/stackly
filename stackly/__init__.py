@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import os
 import sys
 
@@ -26,6 +27,16 @@ def asxpy(x):
         return x
     else:
         return cupy.asarray(x)
+
+@contextmanager
+def measure_time(with_print=False):
+    import time
+    start_time = time.time()
+    yield
+    duration = time.time() - start_time
+    if with_print:
+        print('{}s'.format(duration))
+    return duration
 
 def normalize(X, axis=0, ddof=1):
     dtype = xpy.float64

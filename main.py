@@ -1,4 +1,11 @@
+import argparse
 import sys
+
+parser = argparse.ArgumentParser(description='stackly test code')
+parser.add_argument('--model', default='3FC')
+args = parser.parse_args()
+print('args: {}'.format(args))
+
 import numpy
 from stackly import xpy, normalize, Constant, Variable, Concat, FullyConnected, SpatialConvolution, ReLU, SquaredLoss, NegativeSoftmaxCrossEntropyLoss, Adam
 from stackly.dataset import MNISTDataset
@@ -8,22 +15,21 @@ mnist = MNISTDataset('data/mnist')
 xpy.random.seed(0)
 
 x = Variable('image', (28, 28), dtype=xpy.float32)
-model = '3FC'
-if model == '3FC':
+if args.model == '3FC':
     y1 = FullyConnected(x, 320)
     y2 = ReLU(y1)
     y2 = FullyConnected(y2, 50)
     y3 = ReLU(y2)
     y = FullyConnected(y3, 10)
     # Final Precision:
-elif model == '1SC':
+elif args.model == '1SC':
     y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
     y2 = ReLU(y1)
     y = FullyConnected(y2, 10)
 else:
-    raise Exception('unknown model: {}'.format(model))
+    raise Exception('unknown model: {}'.format(args.model))
 
-print("model {}: {}".format(model, y))
+print("model {}: {}".format(args.model, y))
 
 optim = Adam(y, NegativeSoftmaxCrossEntropyLoss)
 
