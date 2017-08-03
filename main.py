@@ -21,7 +21,6 @@ if args.model == '3FC':
     y2 = FullyConnected(y2, 50)
     y3 = ReLU(y2)
     y = FullyConnected(y3, 10)
-    # Final Precision:
 elif args.model == '1SC':
     y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
     y2 = ReLU(y1)
