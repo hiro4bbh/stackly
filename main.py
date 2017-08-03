@@ -25,6 +25,12 @@ elif args.model == '1SC':
     y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
     y2 = ReLU(y1)
     y = FullyConnected(y2, 10)
+elif args.model == '2SC':
+    y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
+    y2 = ReLU(y1)
+    y2 = SpatialConvolution(y2, 8, (8, 3, 3), (3, 3))
+    y3 = ReLU(y2)
+    y = FullyConnected(y3, 10)
 else:
     raise Exception('unknown model: {}'.format(args.model))
 

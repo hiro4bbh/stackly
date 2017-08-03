@@ -170,15 +170,15 @@ class SpatialConvolution(Layer):
     def get_dtype(self):
         return self.x.get_dtype()
     def forward(self, xs):
-        x = SpatialConvolution.expand_input_dims(xs[0])
-        # x.shape = (nentries, nfeature_maps, height, width)
-        y = SpatialConvolution.convolve(self.w, self.step, x)
+        xs = SpatialConvolution.expand_input_dims(xs[0])
+        # xs.shape = (nentries, nfeature_maps, height, width)
+        y = SpatialConvolution.convolve(self.w, self.step, xs)
         # y.shape = (nentries, output_height, output_width, nkernels)
         y = xpy.transpose(y, axes=(0, 3, 1, 2))
         # y.shape = (nentries, nkernels, output_height, output_width)
         return y
     def backward(self, xs, y, dy, m):
-        x = SpatialConvolution.expand_input_dims(xs[0])
+        xs = SpatialConvolution.expand_input_dims(xs[0])
         x_shape = SpatialConvolution.get_input_shape(self.x.get_shape())
         # x.shape = (nentries, nfeature_maps, height, width)
         y = SpatialConvolution.reshape_output(x_shape, self.w.shape, self.step, y)
@@ -188,7 +188,7 @@ class SpatialConvolution(Layer):
         dx = xpy.transpose(dx, axes=(0, 3, 1, 2))
         # dx.shape = (nentries, nfeature_maps, height, width)
         if self.mutable:
-            xs = SpatialConvolution.reshape_input(self.w.shape, self.step, xs[0])
+            xs = SpatialConvolution.reshape_input(self.w.shape, self.step, xs)
             # xs.shape = (nentries, nfeature_maps, output_height, output_width, kernel_height, kernel_width)
             dw = xpy.tensordot(dy, xs, axes=((0, 2, 3), (0, 2, 3)))/xs.shape[0]
             # dw.shape = (nkernels, nfeature_maps, kernel_height, kernel_width)
