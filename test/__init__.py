@@ -59,6 +59,21 @@ class TestLayer(unittest.TestCase):
             expected[start:(start+numpy.prod(filtered_image.shape[1:]))] = numpy.sum(w[n])
             expected = expected.reshape(filtered_image.shape)
             numpy.testing.assert_equal(asnumpy(filtered_image), expected)
+    def test_max_pooling_2d_forward_backward(self):
+        import numpy
+        from stackly import xpy, asnumpy, asxpy, Variable, MaxPooling2D
+        x = Variable('x', (3, 4, 3), dtype=xpy.float32)
+        y = MaxPooling2D(x, (2, 2), (2, 1))
+        data_x = numpy.zeros((1, 3, 4, 3), dtype=numpy.float32)
+        data_x[0, :, 2, 0] = data_x[0, :, 0, 1] = 1.0
+        data_x = asxpy(data_x)
+        data_y = y.forward((data_x,))
+        data_y_expected = xpy.array([[[[1, 1], [1, 0]]]], dtype=xpy.float32).repeat(3, axis=1)
+        numpy.testing.assert_equal(data_y, data_y_expected)
+        ddata_y = asxpy(numpy.tile(numpy.arange(1, 1+numpy.prod(data_y.shape[2:]), dtype=xpy.float32), data_y.shape[1]).reshape(data_y.shape))
+        ddata_x = y.backward((data_x,), data_y, ddata_y, None)[0]
+        ddata_x_expected = xpy.array([[[[0, 3, 0], [0, 0, 0], [3, 4, 4], [0, 4, 4]]]], dtype=xpy.float32).repeat(3, axis=1)
+        numpy.testing.assert_equal(ddata_x, ddata_x_expected)
 
 class TestNetworkFit(unittest.TestCase):
     def test_multivariate_linear_complete_fit(self):

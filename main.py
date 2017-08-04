@@ -7,15 +7,21 @@ args = parser.parse_args()
 print('args: {}'.format(args))
 
 import numpy
-from stackly import xpy, normalize, Constant, Variable, Concat, FullyConnected, SpatialConvolution, ReLU, SquaredLoss, NegativeSoftmaxCrossEntropyLoss, Adam
+from stackly import xpy, normalize, Constant, Variable, Concat, FullyConnected, SpatialConvolution, MaxPooling2D, ReLU, SquaredLoss, NegativeSoftmaxCrossEntropyLoss, Adam
 from stackly.dataset import MNISTDataset
 
 mnist = MNISTDataset('data/mnist')
 
+numpy.random.seed(0)
 xpy.random.seed(0)
 
 x = Variable('image', (28, 28), dtype=xpy.float32)
-if args.model == '3FC':
+if args.model == '1FC':
+    y = FullyConnected(x, 10)
+    # Least Precision:
+    #   t= 175: loss=0.22811
+    #   train: 56330/60000, test: 9242/10000
+elif args.model == '3FC':
     y1 = FullyConnected(x, 320)
     y2 = ReLU(y1)
     y2 = FullyConnected(y2, 50)
@@ -25,12 +31,12 @@ elif args.model == '1SC':
     y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
     y2 = ReLU(y1)
     y = FullyConnected(y2, 10)
-elif args.model == '2SC':
+elif args.model == '1MP1SC':
     y1 = SpatialConvolution(x, 8, (1, 8, 8), (4, 4))
     y2 = ReLU(y1)
-    y2 = SpatialConvolution(y2, 8, (8, 3, 3), (3, 3))
-    y3 = ReLU(y2)
-    y = FullyConnected(y3, 10)
+    y2 = MaxPooling2D(y2, (3, 3), (1, 1))
+    y2 = ReLU(y2)
+    y = FullyConnected(y2, 10)
 else:
     raise Exception('unknown model: {}'.format(args.model))
 

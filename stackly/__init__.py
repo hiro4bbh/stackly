@@ -226,7 +226,7 @@ class SpatialConvolution(Layer):
     def reshape_input(w_shape, step, xs):
         x_shape = SpatialConvolution.get_input_shape(xs.shape[1:])
         output_shape = SpatialConvolution.get_output_shape(w_shape, step, x_shape)
-        xs_ = xpy.zeros((*xs.shape[:2], *output_shape[1:], *w_shape[2:]))
+        xs_ = xpy.zeros((*xs.shape[:2], *output_shape[1:], *w_shape[2:]), dtype=xs.dtype)
         h_step, w_step = step
         h_end, w_end = x_shape[1] - w_shape[2] + 1, x_shape[2] - w_shape[3] + 1
         for h in range(w_shape[2]):
@@ -234,13 +234,67 @@ class SpatialConvolution(Layer):
                 xs_[:, :, :, :, h, w] = xs[:, :, h:h+h_end:h_step, w:w+w_end:w_step]
         return xs_
     def reshape_output(x_shape, w_shape, step, y):
-        y_ = xpy.zeros((y.shape[0], w_shape[0], *x_shape[1:], *w_shape[2:]))
+        y_ = xpy.zeros((y.shape[0], w_shape[0], *x_shape[1:], *w_shape[2:]), dtype=y.dtype)
         h_step, w_step = step
         h_end, w_end = x_shape[1] - w_shape[2] + 1, x_shape[2] - w_shape[3] + 1
         for h in range(w_shape[2]):
             for w in range(w_shape[3]):
                 y_[:, :, h:h+h_end:h_step, w:w+w_end:w_step, h, w] = y
         return y_
+
+class MaxPooling2D(SpatialConvolution):
+    def __init__(self, x, shape, step=(1, 1)):
+        self.x = x
+        x_shape = MaxPooling2D.get_input_shape(x.get_shape())
+        if len(shape) != 2:
+            raise Exception('shape must be (height, nwidth)')
+        if len(step) != 2:
+            raise Exception('step must be (height_steps, width_steps)')
+        if (x_shape[1] - shape[0])%step[0] != 0:
+            raise Exception('shape height and height step must be conformant to shape of x')
+        if (x_shape[2] - shape[1])%step[1] != 0:
+            raise Exception('shape width and width step must be conformant to shape of x')
+        self.shape = shape
+        self.step = step
+    def get_params(self):
+        return (self.x, self.shape, self.step)
+    def get_prev_layers(self):
+        return (self.x,)
+    def get_shape(self):
+        x_shape = MaxPooling2D.get_input_shape(self.x.get_shape())
+        return MaxPooling2D.get_output_shape((x_shape[0], -1, *self.shape), self.step, x_shape)
+    def get_dtype(self):
+        return self.x.get_dtype()
+    def forward(self, xs):
+        xs = MaxPooling2D.expand_input_dims(xs[0])
+        # xs.shape = (nentries, nfeature_maps, height, width)
+        y = MaxPooling2D.pool(self.shape, self.step, xs)
+        # y.shape = (nentries, nfeature_maps, output_height, output_width)
+        return y
+    def backward(self, xs, y, dy, m):
+        xs = MaxPooling2D.expand_input_dims(xs[0])
+        x_shape = MaxPooling2D.get_input_shape(self.x.get_shape())
+        # x.shape = (nentries, nfeature_maps, height, width)
+        y = MaxPooling2D.reshape_output(x_shape, (x_shape[0], -1, *self.shape), self.step, y)
+        # y.shape = (nentries, nfeature_maps, height, width, shape_height, shape_width)
+        y = xpy.transpose(y, axes=(4, 5, 0, 1, 2, 3))
+        # y.shape = (shape_height, shape_width, nentries, nfeature_maps, height, width)
+        dy = MaxPooling2D.reshape_output(x_shape, (x_shape[0], -1, *self.shape), self.step, dy)
+        # dy.shape = (nentries, nfeature_maps, height, width, shape_height, shape_width)
+        dy = xpy.transpose(dy, axes=(4, 5, 0, 1, 2, 3))
+        # dy.shape = (shape_height, shape_width, nentries, nfeature_maps, height, width)
+        dx = xpy.sum((y == xs)*dy, axis=(0, 1))
+        # dx.shape = (nentries, nfeature_maps, height, width)
+        return (dx,)
+    def pool(shape, step, xs):
+        x_shape = MaxPooling2D.get_input_shape(xs.shape[1:])
+        output_shape = MaxPooling2D.get_output_shape((x_shape[0], -1, *shape), step, x_shape)
+        # xs.shape = (nentries, nfeature_maps, height, width)
+        xs = MaxPooling2D.reshape_input((x_shape[0], -1, *shape), step, xs)
+        # xs.shape = (nentries, nfeature_maps, output_height, output_width, height, width)
+        y = xpy.amax(xs, axis=(4, 5))
+        # y.shape = (nentries, output_height, output_width, nkernels)
+        return y
 
 class ReLU(Layer):
     def __init__(self, x):
