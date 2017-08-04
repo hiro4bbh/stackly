@@ -58,7 +58,7 @@ class Layer:
         return int(numpy.prod(self.get_shape()))
     def get_dtype(self):
         raise NotImplementedError()
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         raise NotImplementedError()
     def backward(self, xs, y, dy, m):
         raise NotImplementedError()
@@ -76,7 +76,7 @@ class Constant(Layer):
         return self.value.shape
     def get_dtype(self):
         return self.value.dtype
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         return asxpy(numpy.array([self.value], dtype=self.value.dtype))
 
 class Variable(Layer):
@@ -107,7 +107,7 @@ class Concat(Layer):
         return (self.shape,)
     def get_dtype(self):
         return self.xs[0].get_dtype()
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         sizes = xpy.array([v.shape[0] for v in xs])
         repeats = xpy.max(sizes)//sizes
         return xpy.concatenate([xs[i].repeat(int(repeats[i]), axis=0) for i in range(len(xs))], axis=1)
@@ -128,7 +128,7 @@ class FullyConnected(Layer):
         return (self.w.shape[0],)
     def get_dtype(self):
         return self.w.dtype
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         x = xs[0].reshape(xs[0].shape[0], -1)
         return xpy.tensordot(x, self.w, axes=((1,), (1,)))
     def backward(self, xs, y, dy, m):
@@ -169,7 +169,7 @@ class SpatialConvolution(Layer):
         return SpatialConvolution.get_output_shape(self.w.shape, self.step, x_shape)
     def get_dtype(self):
         return self.x.get_dtype()
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         xs = SpatialConvolution.expand_input_dims(xs[0])
         # xs.shape = (nentries, nfeature_maps, height, width)
         y = SpatialConvolution.convolve(self.w, self.step, xs)
@@ -265,7 +265,7 @@ class MaxPooling2D(SpatialConvolution):
         return MaxPooling2D.get_output_shape((x_shape[0], -1, *self.shape), self.step, x_shape)
     def get_dtype(self):
         return self.x.get_dtype()
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         xs = MaxPooling2D.expand_input_dims(xs[0])
         # xs.shape = (nentries, nfeature_maps, height, width)
         y = MaxPooling2D.pool(self.shape, self.step, xs)
@@ -302,15 +302,35 @@ class ReLU(Layer):
     def get_params(self):
         return (self.x,)
     def get_prev_layers(self):
-        return(self.x,)
+        return (self.x,)
     def get_shape(self):
         return self.x.get_shape()
     def get_dtype(self):
         return self.x.get_dtype()
-    def forward(self, xs):
+    def forward(self, xs, training=False):
         return xpy.maximum(xs[0], 0.0)
     def backward(self, xs, y, dy, m):
         return (dy*xpy.sign(y),)
+
+class Dropout(Layer):
+    def __init__(self, x, p=0.5):
+        self.x = x
+        self.p = p
+    def get_params(self):
+        return (self.x, self.p)
+    def get_prev_layers(self):
+        return (self.x,)
+    def get_shape(self):
+        return self.x.get_shape()
+    def get_dtype(self):
+        return self.x.get_dtype()
+    def forward(self, xs, training=False):
+        if training:
+            mask = asxpy(numpy.random.binomial(1, self.p, xs[0].shape).astype(numpy.float32))
+            return xs[0]*mask/self.p
+        return xs[0]
+    def backward(self, xs, y, dy, m):
+        return (dy*((xs[0] == 0) | (y != 0)),)
 
 class SquaredLoss:
     if not xpy == numpy:
@@ -379,7 +399,7 @@ class OptimizerBase:
         traverse_layers(self.fn)
     def param_man(self, size):
         raise NotImplementedError
-    def forward(self, x):
+    def forward(self, x, training=False):
         h = [None]*len(self.layers)
         def forward_layer(layer_id):
             layer = self.layers[layer_id]
@@ -389,7 +409,7 @@ class OptimizerBase:
             else:
                 for prev_layer_id in prev_layers:
                     forward_layer(prev_layer_id)
-                h[layer_id] = layer.forward(list(map(h.__getitem__, prev_layers)))
+                h[layer_id] = layer.forward(list(map(h.__getitem__, prev_layers)), training=training)
         forward_layer(0)
         return h
     def backward(self, x, h, dloss_val):
@@ -401,7 +421,7 @@ class OptimizerBase:
                     backward_layer(prev_layers[j], dx[j])
         backward_layer(0, dloss_val)
     def run(self, x, y):
-        h = self.forward(x)
+        h = self.forward(x, training=True)
         l = self.loss.loss(y, h[0])/y.shape[0]
         self.backward(x, h, self.loss.dloss(y, h[0]))
         return l

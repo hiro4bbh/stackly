@@ -50,7 +50,7 @@ class TestLayer(unittest.TestCase):
             images[n] = numpy.tile(w[n], (1, 3, 3))
         images = asxpy(images)
         # Test forward.
-        filtered_images = filter_layer.forward((images,))
+        filtered_images = filter_layer.forward((images,), training=True)
         expected_template = numpy.full(numpy.prod(filtered_images.shape[1:]), 3, dtype=numpy.float32)
         for n in range(filtered_images.shape[0]):
             filtered_image = filtered_images[n]
@@ -61,18 +61,33 @@ class TestLayer(unittest.TestCase):
             numpy.testing.assert_equal(asnumpy(filtered_image), expected)
     def test_max_pooling_2d_forward_backward(self):
         import numpy
-        from stackly import xpy, asnumpy, asxpy, Variable, MaxPooling2D
+        from stackly import xpy, asxpy, Variable, MaxPooling2D
         x = Variable('x', (3, 4, 3), dtype=xpy.float32)
         y = MaxPooling2D(x, (2, 2), (2, 1))
         data_x = numpy.zeros((1, 3, 4, 3), dtype=numpy.float32)
         data_x[0, :, 2, 0] = data_x[0, :, 0, 1] = 1.0
         data_x = asxpy(data_x)
-        data_y = y.forward((data_x,))
+        data_y = y.forward((data_x,), training=True)
         data_y_expected = xpy.array([[[[1, 1], [1, 0]]]], dtype=xpy.float32).repeat(3, axis=1)
         numpy.testing.assert_equal(data_y, data_y_expected)
         ddata_y = asxpy(numpy.tile(numpy.arange(1, 1+numpy.prod(data_y.shape[2:]), dtype=xpy.float32), data_y.shape[1]).reshape(data_y.shape))
         ddata_x = y.backward((data_x,), data_y, ddata_y, None)[0]
         ddata_x_expected = xpy.array([[[[0, 3, 0], [0, 0, 0], [3, 4, 4], [0, 4, 4]]]], dtype=xpy.float32).repeat(3, axis=1)
+        numpy.testing.assert_equal(ddata_x, ddata_x_expected)
+    def test_dropout_forward_backward(self):
+        import numpy
+        from stackly import xpy, asxpy, Variable, Dropout
+        numpy.random.seed(0)
+        xpy.random.seed(0)
+        x = Variable('x', (2, 5), dtype=xpy.float32)
+        y = Dropout(x)
+        data_x = asxpy(numpy.tile(numpy.arange(5, dtype=xpy.float32), 2).reshape(2, 5))
+        data_y = y.forward((data_x,), training=True)
+        data_y_expected = xpy.array([[0, 2, 4, 6, 0], [0, 0, 4, 6, 0]], dtype=xpy.float32)
+        numpy.testing.assert_equal(data_y, data_y_expected)
+        ddata_y = xpy.arange(10, dtype=xpy.float32).reshape(2, 5)
+        ddata_x = y.backward((data_x,), data_y, ddata_y, None)[0]
+        ddata_x_expected = xpy.array([[0, 1, 2, 3, 0], [5, 0, 7, 8, 0]], dtype=xpy.float32)
         numpy.testing.assert_equal(ddata_x, ddata_x_expected)
 
 class TestNetworkFit(unittest.TestCase):
