@@ -35,7 +35,9 @@ def measure_time(with_print=False):
     yield
     duration = time.time() - start_time
     if with_print:
-        print('{}s'.format(duration))
+        import inspect
+        frame = inspect.stack()[1]
+        print('{}:{}: {}s'.format(frame.filename, frame.lineno, duration))
     return duration
 
 def normalize(X, axis=0, ddof=1):
